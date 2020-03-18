@@ -4,7 +4,7 @@ use std::time::UNIX_EPOCH;
 use fuse::{FileAttr, FileType};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum FileTypeDump {
     Directory,
     RegularFile,
@@ -32,7 +32,7 @@ impl Into<FileType> for FileTypeDump {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FileAttrDump {
     pub ino: u64,
     pub size: u64,
