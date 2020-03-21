@@ -1,14 +1,17 @@
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::fs::{File as Disk, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use fuse::{Filesystem, ReplyAttr, ReplyDirectory, ReplyEntry, Request};
-use libc::ENOENT;
+use fuse::{Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEntry, Request};
+use libc::{ENFILE, ENOENT};
 
+use crate::file_meta::dump_file_attr::FileTypeDump;
 use crate::file_meta::File;
 use crate::fs::meta::{DumbFsMeta, MAGIC};
 use crate::util::align;
@@ -67,9 +70,11 @@ impl Filesystem for DumbFS {
             let result = root.children().find(|it|
                 name.to_str().unwrap() == it.header().filename
             );
-            result.map(|it| {
+            if let Some(it) = result {
                 reply.entry(&TTL, &it.header().fixed_sized_part.file_attr.into(), 0);
-            });
+            } else {
+                reply.error(ENOENT);
+            }
         } else {
             reply.error(ENOENT);
         }
@@ -79,13 +84,25 @@ impl Filesystem for DumbFS {
         let root = File::new(align(DumbFsMeta::serialize_size()), self.disk.clone());
         if root.header().fixed_sized_part.file_attr.ino == ino {
             reply.attr(&TTL, &root.header().fixed_sized_part.file_attr.into())
-        } else {
-            root.children()
-                .find(|it| it.header().fixed_sized_part.file_attr.ino == ino)
-                .map(|it| reply.attr(&TTL, &it.header().fixed_sized_part.file_attr.into()));
+        } else if let Some(it) = root.children()
+            .find(|it| it.header().fixed_sized_part.file_attr.ino == ino) {
+            reply.attr(&TTL, &it.header().fixed_sized_part.file_attr.into())
         }
     }
+
+    fn read(&mut self, _req: &Request<'_>, ino: u64, _fh: u64, offset: i64, size: u32, reply: ReplyData) {
+        info!("read inode: {} [{}..{}]", ino, offset, offset + size as i64);
+        let root = File::new(align(DumbFsMeta::serialize_size()), self.disk.clone());
+        let file = root.children()
+            .find(|it| it.header().fixed_sized_part.file_attr.ino == ino).unwrap();
+        drop(root);
+        let mut buffer = vec![0; size as _];
+        file.read_at(offset as _, &mut buffer[..]);
+        reply.data(&buffer[..]);
+    }
+
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: i64, mut reply: ReplyDirectory) {
+        info!("read dir: {}", ino);
         if ino != 1 {
             reply.error(ENOENT);
             return;
@@ -98,5 +115,30 @@ impl Filesystem for DumbFS {
             reply.add(attr.ino, (i + 1) as i64, attr.kind.into(), filename);
         }
         reply.ok()
+    }
+
+    fn create(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, _mode: u32, _flags: u32, reply: ReplyCreate) {
+        info!("create: {:?} in {}", name, parent);
+        assert_eq!(parent, 1);
+        let root = File::new(align(DumbFsMeta::serialize_size()), self.disk.clone());
+        let mut last_file = root.children().last().unwrap();
+        let start_address = last_file.next_chunk_start();
+        last_file.set_next_sibling(start_address);
+        let mut newfile = File::new(start_address, self.disk.clone());
+        let mut header = newfile.header();
+        let ino = self.meta.acquire_next_ino(self.disk.deref().borrow_mut().deref_mut());
+        header.filename = name.to_str().unwrap().to_string();
+        header.fixed_sized_part.file_attr.ino = ino;
+        header.fixed_sized_part.file_attr.crtime = SystemTime::now();
+        header.fixed_sized_part.file_attr.atime = SystemTime::now();
+        header.fixed_sized_part.file_attr.ctime = SystemTime::now();
+        header.fixed_sized_part.file_attr.mtime = SystemTime::now();
+        header.fixed_sized_part.file_attr.perm = 0o777;
+        header.fixed_sized_part.file_attr.kind = FileTypeDump::RegularFile;
+        header.fixed_sized_part.file_attr.size = 0;
+        header.fixed_sized_part.file_attr.blocks = 1;
+        let attr = header.fixed_sized_part.file_attr.clone();
+        newfile.set_header(header);
+        reply.created(&TTL, &attr.into(), 1, ino, 0);
     }
 }

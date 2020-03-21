@@ -1,14 +1,17 @@
 use std::cell::RefCell;
 use std::fs::File as Disk;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 use std::rc::Rc;
 use std::time::UNIX_EPOCH;
 
+use bincode::serialized_size;
 use fuse::FileType;
 use serde::{Deserialize, Serialize};
 
 use crate::file_meta::dump_file_attr::{FileAttrDump, FileTypeDump};
+use crate::file_meta::dump_file_attr::FileTypeDump::{Directory, RegularFile};
+use crate::fs::meta::DumbFsMeta;
 use crate::util::align;
 
 pub(crate) mod dump_file_attr;
@@ -89,6 +92,16 @@ impl File {
         }
     }
     pub fn address(&self) -> u64 { self.address }
+    pub fn content_address(&self) -> u64 {
+        let header = self.header();
+        self.address + serialized_size(&header).unwrap()
+    }
+    pub fn next_chunk_start(&self) -> u64 {
+        let header = self.header();
+        align(self.address
+            + serialized_size(&header).unwrap()
+            + header.fixed_sized_part.file_attr.size)
+    }
     pub fn header(&self) -> FileHead {
         self.disk.borrow_mut().seek(SeekFrom::Start(self.address)).unwrap();
         FileHead::deserialize_from(self.disk.borrow_mut().deref_mut()).unwrap_or(FileHead::new())
@@ -141,6 +154,11 @@ impl File {
         let mut header = self.header();
         header.fixed_sized_part.file_attr.kind = file_type.into();
         self.set_header(header);
+    }
+    pub fn read_at(&self, offset: usize, result: &mut [u8]) {
+        let address = self.content_address();
+        self.disk.borrow_mut().seek(SeekFrom::Start(address + offset as u64)).unwrap();
+        self.disk.borrow_mut().read_exact(result).unwrap();
     }
 }
 

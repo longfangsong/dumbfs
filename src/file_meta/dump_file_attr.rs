@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use fuse::{FileAttr, FileType};
 use serde::{Deserialize, Serialize};
