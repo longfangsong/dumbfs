@@ -104,7 +104,7 @@ impl File {
     }
     pub fn header(&self) -> FileHead {
         self.disk.borrow_mut().seek(SeekFrom::Start(self.address)).unwrap();
-        FileHead::deserialize_from(self.disk.borrow_mut().deref_mut()).unwrap_or(FileHead::new())
+        FileHead::deserialize_from(self.disk.borrow_mut().deref_mut()).unwrap_or_else(|_| FileHead::new())
     }
     pub fn set_header(&mut self, head: FileHead) {
         self.disk.borrow_mut().seek(SeekFrom::Start(self.address)).unwrap();
