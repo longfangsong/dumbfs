@@ -1,10 +1,9 @@
 use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use fuse::{FileAttr, FileType};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum FileTypeDump {
     Directory,
     RegularFile,
