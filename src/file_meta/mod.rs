@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::cmp::max;
 use std::fs::File as Disk;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::DerefMut;
@@ -159,6 +160,17 @@ impl File {
         let address = self.content_address();
         self.disk.borrow_mut().seek(SeekFrom::Start(address + offset as u64)).unwrap();
         self.disk.borrow_mut().read_exact(result).unwrap();
+    }
+    pub fn write(&mut self, offset: usize, result: &[u8]) {
+        let origin_address = self.content_address();
+        self.disk.borrow_mut().seek(SeekFrom::Start(origin_address + offset as u64)).unwrap();
+        self.disk.borrow_mut().write_all(result).unwrap();
+        let new_address = self.disk.borrow_mut().seek(SeekFrom::Current(0)).unwrap();
+        let mut header = self.header();
+        let old_size = header.fixed_sized_part.file_attr.size;
+        header.fixed_sized_part.file_attr.size =
+            max(old_size, new_address - origin_address);
+        self.set_header(header);
     }
 }
 

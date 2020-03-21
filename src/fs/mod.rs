@@ -1,13 +1,12 @@
 use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::fs::{File as Disk, OpenOptions};
-use std::io::SeekFrom;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
-use fuse::{Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEntry, Request};
+use fuse::{Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEntry, ReplyWrite, Request};
 use libc::ENOENT;
 
 use crate::file_meta::dump_file_attr::FileTypeDump;
@@ -66,6 +65,7 @@ impl Filesystem for DumbFS {
         }
         Ok(())
     }
+
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         info!("lookup content in inode: {}", parent);
         if parent == 1 {
@@ -82,6 +82,7 @@ impl Filesystem for DumbFS {
             reply.error(ENOENT);
         }
     }
+
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         info!("fetch attr for inode: {}", ino);
         let root = File::new(align(DumbFsMeta::serialize_size()), self.disk.clone());
@@ -102,6 +103,16 @@ impl Filesystem for DumbFS {
         file.read_at(offset as _, &mut buffer[..]);
         reply.data(&buffer[..]);
     }
+
+    fn write(&mut self, _req: &Request<'_>, ino: u64, _fh: u64, offset: i64, data: &[u8], _flags: u32, reply: ReplyWrite) {
+        info!("write inode: {}", ino);
+        let root = File::new(align(DumbFsMeta::serialize_size()), self.disk.clone());
+        let mut file = root.children()
+            .find(|it| it.header().fixed_sized_part.file_attr.ino == ino).unwrap();
+        file.write(offset as _, data);
+        reply.written(data.len() as _);
+    }
+
 
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: i64, mut reply: ReplyDirectory) {
         info!("read dir: {}", ino);
