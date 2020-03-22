@@ -1,8 +1,9 @@
-use std::io::{Seek, SeekFrom, Write};
-
+use crate::disk::dump::DumpToFixedLocation;
+use crate::disk::Disk;
+use bincode::Error;
 use serde::{Deserialize, Serialize};
-
-use crate::util::align;
+#[cfg(test)]
+use std::io;
 
 pub const MAGIC: u32 = 0xAA55_9669;
 
@@ -10,51 +11,62 @@ pub const MAGIC: u32 = 0xAA55_9669;
 pub struct DumbFsMeta {
     pub magic: u32,
     next_ino: u64,
-    next_free_address: u64,
+    pub next_free_address: u64,
 }
 
-impl DumbFsMeta {
-    pub fn serialize_size() -> u64 {
-        bincode::serialized_size(&DumbFsMeta {
-            magic: MAGIC,
-            next_ino: 1,
-            next_free_address: 0,
-        })
-            .unwrap()
-    }
-    pub fn new() -> Self {
+impl Default for DumbFsMeta {
+    fn default() -> Self {
         DumbFsMeta {
             magic: 0xAA55_9669,
             next_ino: 1,
-            next_free_address: align(DumbFsMeta::serialize_size()),
+            next_free_address: 512,
         }
     }
-    pub fn deserialize_from<R>(reader: R) -> bincode::Result<Self>
-        where
-            R: std::io::Read,
-    {
-        bincode::deserialize_from(reader)
-    }
-    pub fn serialize_into<W>(&self, writer: W) -> bincode::Result<()>
-        where
-            W: std::io::Write,
-    {
-        bincode::serialize_into(writer, self)
-    }
-    fn save<W>(&mut self, f: &mut W) where W: Write + Seek {
-        f.seek(SeekFrom::Start(0)).unwrap();
-        self.serialize_into(f).unwrap();
-    }
-    pub fn sync<W>(&mut self, f: &mut W) where W: Write + Seek {
-        self.next_free_address = align(f.seek(SeekFrom::End(0)).unwrap());
-        self.save(f);
-    }
-    pub fn acquire_next_ino<W>(&mut self, f: &mut W) -> u64
-        where W: Write + Seek {
+}
+
+impl DumbFsMeta {
+    pub fn acquire_next_ino(&mut self) -> u64 {
         let result = self.next_ino;
         self.next_ino += 1;
-        self.save(f);
         result
     }
-    pub fn next_free_address(&self) -> u64 { self.next_free_address }
+    pub fn valid(&self) -> bool {
+        self.magic == MAGIC
+    }
+}
+
+impl DumpToFixedLocation<DumbFsMeta> for DumbFsMeta {
+    fn dump_part(&self) -> DumbFsMeta {
+        self.clone()
+    }
+
+    fn location(&self) -> u64 {
+        0
+    }
+
+    fn load(disk: &Disk, address: u64) -> Result<Self, Error> {
+        assert_eq!(address, 0);
+        disk.load_at(address)
+    }
+}
+
+#[test]
+fn test_meta() -> io::Result<()> {
+    use tempfile::tempdir;
+    let tempdir = tempdir()?;
+    let file_path = tempdir.path().join("temp.img");
+    let disk = Disk::new(file_path);
+    let new_meta = DumbFsMeta::default();
+    new_meta.sync(&disk);
+    let mut meta = DumbFsMeta::load(&disk, 0).unwrap();
+    assert_eq!(meta.next_free_address, 512);
+    meta.next_free_address = 1024;
+    assert_eq!(meta.acquire_next_ino(), 1);
+    assert_eq!(meta.acquire_next_ino(), 2);
+    meta.sync(&disk);
+    let mut meta = DumbFsMeta::load(&disk, 0).unwrap();
+    assert!(meta.valid());
+    assert_eq!(meta.acquire_next_ino(), 3);
+    assert_eq!(meta.next_free_address, 1024);
+    Ok(())
 }

@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 pub enum FileTypeDump {
     Directory,
     RegularFile,
-    Symlink,
 }
 
 impl From<FileType> for FileTypeDump {
@@ -15,7 +14,6 @@ impl From<FileType> for FileTypeDump {
         match origin {
             FileType::Directory => FileTypeDump::Directory,
             FileType::RegularFile => FileTypeDump::RegularFile,
-            FileType::Symlink => FileTypeDump::Symlink,
             _ => unimplemented!("Not supported now"),
         }
     }
@@ -26,7 +24,6 @@ impl Into<FileType> for FileTypeDump {
         match self {
             FileTypeDump::Directory => FileType::Directory,
             FileTypeDump::RegularFile => FileType::RegularFile,
-            FileTypeDump::Symlink => FileType::Symlink,
         }
     }
 }
@@ -47,6 +44,27 @@ pub struct FileAttrDump {
     pub gid: u32,
     pub rdev: u32,
     pub flags: u32,
+}
+
+impl Default for FileAttrDump {
+    fn default() -> Self {
+        FileAttrDump {
+            ino: 0,
+            size: 0,
+            blocks: 0,
+            atime: SystemTime::now(),
+            mtime: SystemTime::now(),
+            ctime: SystemTime::now(),
+            crtime: SystemTime::now(),
+            kind: FileTypeDump::Directory,
+            perm: 0o777,
+            nlink: 0,
+            uid: 0,
+            gid: 0,
+            rdev: 0,
+            flags: 0,
+        }
+    }
 }
 
 impl From<FileAttr> for FileAttrDump {
@@ -115,4 +133,6 @@ fn test_encode_decode() {
         .unwrap()
         .into();
     assert_eq!(decoded.size, 1024);
+    let dump: FileAttrDump = decoded.into();
+    assert_eq!(dump.kind, FileTypeDump::RegularFile);
 }
