@@ -3,6 +3,7 @@ use crate::disk::Disk;
 use crate::file::dump_file_attr::FileAttrDump;
 use crate::file::{dump_file_attr::FileTypeDump, File, FileBuilder};
 use crate::fs::meta::DumbFsMeta;
+use crate::util::align;
 use fuse::{
     Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
     ReplyOpen, ReplyWrite, Request,
@@ -229,7 +230,7 @@ impl Filesystem for DumbFS {
                     parent.meta.first_child = at_address;
                     parent.sync(&self.disk);
                 }
-                self.meta.next_free_address = new_created.address_after_dump();
+                self.meta.next_free_address = align(new_created.address_after_dump(), 512);
                 self.meta.sync(&self.disk);
                 let fh = self.next_file_handler;
                 self.next_file_handler += 1;
@@ -315,7 +316,7 @@ impl Filesystem for DumbFS {
                     parent.meta.first_child = at_address;
                     parent.sync(&self.disk);
                 }
-                self.meta.next_free_address = new_created.address_after_dump();
+                self.meta.next_free_address = align(new_created.address_after_dump(), 512);
                 self.meta.sync(&self.disk);
                 let fh = self.next_file_handler;
                 self.next_file_handler += 1;
